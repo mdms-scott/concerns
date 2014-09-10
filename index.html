@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title>Concerns in Ruby on Rails 4</title>
+
+		<meta name="description" content="Interesting uses for Rails concerns">
+		<meta name="author" content="Matt Scott">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', include the PDF print sheet -->
+		<script>
+			if( window.location.search.match( /print-pdf/gi ) ) {
+				var link = document.createElement( 'link' );
+				link.rel = 'stylesheet';
+				link.type = 'text/css';
+				link.href = 'css/print/pdf.css';
+				document.getElementsByTagName( 'head' )[0].appendChild( link );
+			}
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+				<section>
+					<h1>Concerns</h1>
+					<h3>Rails's take on... well... separation of concerns</h3>
+				</section>
+
+				<section>
+					<h2>Separation of concerns?</h2>
+					<p>
+						"In computer science, separation of concerns (SoC) is a design principle for separating a computer program into distinct sections, such that each section addresses a separate concern. A concern is a set of information that affects the code of a computer program. A concern can be as general as the details of the hardware the code is being optimized for, or as specific as the name of a class to instantiate. A program that embodies SoC well is called a modular program... The value of separation of concerns is simplifying development and maintenance of computer programs. When concerns are well-separated, individual sections can be developed and updated independently. Of special value is the ability to later improve or modify one section of code without having to know the details of other sections, and without having to make corresponding changes to those sections."
+					</p>
+				</section>
+
+				<!-- Example of nested vertical slides -->
+				<section>
+					<section id="fragments">
+						<h2>When might I want to use concerns?</h2>
+						<ul>
+							<li class="fragment">Tagging things</li>
+							<li class="fragment">Adding comments to things</li>
+							<li class="fragment">Adding status to things</li>
+							<li class="fragment">Scoping your objects</li>
+						</ul>
+					</section>
+				</section>
+
+				<section>
+					<h2>So you want to tag some models?</h2>
+				</section>
+
+				<section>
+					<h2>Basic tagging</h2>
+					<pre><code class="ruby" data-trim contenteditable>
+# app/models/product.rb
+class Product
+  include Taggable
+
+  ...
+end
+
+# app/models/concerns/taggable.rb
+# notice that the file name has to match the module name 
+# (applying Rails conventions for autoloading)
+module Taggable
+  extend ActiveSupport::Concern
+
+  included do
+    has_many :taggings, as: :taggable
+    has_many :tags, through: :taggings
+
+    class_attribute :tag_limit
+  end
+
+  def tags_string
+    tags.map(&:name).join(', ')
+  end
+
+  def tags_string=(tag_string)
+    tag_names = tag_string.to_s.split(', ')
+
+    tag_names.each do |tag_name|
+      tags.build(name: tag_name)
+    end
+  end
+
+  # methods defined here are going to extend the class, not the instance of it
+  module ClassMethods
+
+    def tag_limit(value)
+      self.tag_limit_value = value
+    end
+
+  end
+
+end
+					</code></pre>
+					<p>Courtesy of <a href="http://stackoverflow.com/a/15078070">stack overflow</a>.</p>
+				</section>
+
+				<section>
+					<h2>So then we can do...</h2>
+					<pre><code data-trim contenteditable>
+product = Product.new
+product.tags_string = "green, large, shirt"
+product.tags_string
+ => "green, large, shirt"
+product.tags
+ => [{name: "green"}, {name: "large"}, {name: "shirt"}]
+
+Product.tag_limit(5)
+					</code></pre>
+				</section>
+
+				<section>
+					<section>
+						<h2>But Matt, what if I want to scope</h2>
+						<h2>multiple models by date?</h2>
+						<p>
+							Well lets take a look:
+						</p>
+					</section>
+					<section>
+						<pre><code class="ruby" data-trim contenteditable>
+module DateScopes
+  extend ActiveSupport::Concern
+
+  module ClassMethods
+
+    def include_date_scopes
+
+      define_singleton_method :"between" do |start_datetime, stop_datetime|
+        where ['created_at >= AND created_at <', start_datetime, stop_datetime]
+      end
+      
+      define_singleton_method :"on_or_before_date" do |date|
+        where ['created_at <= ?', date]
+      end
+    end
+  end
+end
+						</code></pre>
+					</section>
+
+					<section>
+						<h2>And then...</h2>
+						<pre><code class="ruby" data-trim contenteditable>
+class Article << ActiveRecord::Base
+  include DateScopes
+
+  include_date_scopes
+
+  #...
+end
+						</code></pre>
+					</section>
+
+					<section>
+						<h2>And then...</h2>
+						<pre><code data-trim contenteditable>
+Article.between((Time.now - 7.days), Time.now)
+ => #&ltActiveRecord::Relation [...]&gt
+Article.between(Time.now, (Time.now + 7.days))
+ => #&ltActiveRecord::Relation []&gt
+
+Article.on_or_before(Time.now - 7.years)
+ => #&ltActiveRecord::Relation []&gt
+Article.between(Time.now)
+ => #&ltActiveRecord::Relation [...]&gt
+						</code></pre>
+					</section>
+				</section>
+				<section>
+					<h2>But Matt, why is there a concerns folder in the controllers directory?</h2>
+					<p>You can do many things with controller concerns:</p>
+					<ul>
+						<li>Authentication</li>
+						<li>Error handling</li>
+						<li>Shared actions</li>
+					</ul>
+				</section>
+
+				<section>
+					<h2>Let's take a look at error handling</h2>
+					<pre><code class="ruby" data-trim contenteditable>
+module RescueExceptions
+  extend ActiveSupport::Concern
+
+  included do
+    rescue_from ::ActionView::MissingTemplate, :with => :handle_missing_page
+    rescue_from ::ActiveRecord::RecordNotFound, :with => :handle_missing_record
+  end
+
+  protected
+
+  def handle_missing_page(exception)
+    logger.error("#{exception.class.name}: #{exception.message} #{exception.backtrace.join("\n")}")
+    redirect_to your_404_path
+  end
+
+  def handle_missing_record(exception)
+    logger.error("#{exception.class.name}: #{exception.message} #{exception.backtrace.join("\n")}")
+    redirect_to your_missing_record_page
+  end
+
+end
+
+					</code></pre>
+				</section>
+
+			</div>
+
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Parallax scrolling
+				// parallaxBackgroundImage: 'https://s3.amazonaws.com/hakim-static/reveal-js/reveal-parallax-1.jpg',
+				// parallaxBackgroundSize: '2100px 900px',
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>
